@@ -46,6 +46,11 @@ class VideoPlayer {
   final StreamController<VideoEvent> _eventController;
   final html.VideoElement _videoElement;
 
+  /// Allows to display multiple [html.VideoElement] with single VideoPlayerController.
+  ///
+  /// https://github.com/flutter/flutter/issues/124210
+  final List<html.VideoElement> _proxyVideoElements = <html.VideoElement>[];
+
   bool _isInitialized = false;
   bool _isBuffering = false;
 
@@ -130,6 +135,16 @@ class VideoPlayer {
   /// When called from some user interaction (a tap on a button), the above
   /// limitation should disappear.
   Future<void> play() {
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      if (proxy.paused) {
+        proxy.play().catchError((Object e) {
+          // onEnded triggers: VideoEventType.completed
+          // VideoPlayer handles VideoEventType.completed event: pause().then((void pauseResult) => seekTo(value.duration));
+          // seekTo triggers onEnded ...
+        });
+      }
+    }
+
     return _videoElement.play().catchError((Object e) {
       // play() attempts to begin playback of the media. It returns
       // a Promise which can get rejected in case of failure to begin
@@ -146,12 +161,21 @@ class VideoPlayer {
 
   /// Pauses the video in the current position.
   void pause() {
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      if (!proxy.paused) {
+        proxy.pause();
+      }
+    }
+
     _videoElement.pause();
   }
 
   /// Controls whether the video should start again after it finishes.
   // ignore: use_setters_to_change_properties
   void setLooping(bool value) {
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      proxy.loop = value;
+    }
     _videoElement.loop = value;
   }
 
@@ -164,9 +188,14 @@ class VideoPlayer {
   void setVolume(double volume) {
     assert(volume >= 0 && volume <= 1);
 
+    final bool muted = !(volume > 0.0);
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      proxy.muted = muted;
+      proxy.volume = volume;
+    }
     // TODO(ditman): Do we need to expose a "muted" API?
     // https://github.com/flutter/flutter/issues/60721
-    _videoElement.muted = !(volume > 0.0);
+    _videoElement.muted = muted;
     _videoElement.volume = volume;
   }
 
@@ -184,6 +213,9 @@ class VideoPlayer {
   void setPlaybackSpeed(double speed) {
     assert(speed > 0);
 
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      proxy.playbackRate = speed;
+    }
     _videoElement.playbackRate = speed;
   }
 
@@ -193,7 +225,11 @@ class VideoPlayer {
   void seekTo(Duration position) {
     assert(!position.isNegative);
 
-    _videoElement.currentTime = position.inMilliseconds.toDouble() / 1000;
+    final double currentTime = position.inMilliseconds.toDouble() / 1000;
+    for (final html.VideoElement proxy in _proxyVideoElements) {
+      proxy.currentTime = currentTime;
+    }
+    _videoElement.currentTime = currentTime;
   }
 
   /// Returns the current playback head position as a [Duration].
@@ -208,16 +244,16 @@ class VideoPlayer {
     _videoElement.load();
   }
 
-  // Sends an [VideoEventType.initialized] [VideoEvent] with info about the wrapped video.
+  /// Sends an [VideoEventType.initialized] [VideoEvent] with info about the wrapped video.
   void _sendInitialized() {
     final Duration? duration =
-        convertNumVideoDurationToPluginDuration(_videoElement.duration);
+    convertNumVideoDurationToPluginDuration(_videoElement.duration);
 
     final Size? size = _videoElement.videoHeight.isFinite
         ? Size(
-            _videoElement.videoWidth.toDouble(),
-            _videoElement.videoHeight.toDouble(),
-          )
+      _videoElement.videoWidth.toDouble(),
+      _videoElement.videoHeight.toDouble(),
+    )
         : null;
 
     _eventController.add(
@@ -245,7 +281,7 @@ class VideoPlayer {
     }
   }
 
-  // Broadcasts the [html.VideoElement.buffered] status through the [events] stream.
+  /// Broadcasts the [html.VideoElement.buffered] status through the [events] stream.
   void _sendBufferingRangesUpdate() {
     _eventController.add(VideoEvent(
       buffered: _toDurationRange(_videoElement.buffered),
@@ -253,7 +289,7 @@ class VideoPlayer {
     ));
   }
 
-  // Converts from [html.TimeRanges] to our own List<DurationRange>.
+  /// Converts from [html.TimeRanges] to our own List<DurationRange>.
   List<DurationRange> _toDurationRange(html.TimeRanges buffered) {
     final List<DurationRange> durationRange = <DurationRange>[];
     for (int i = 0; i < buffered.length; i++) {
@@ -263,5 +299,10 @@ class VideoPlayer {
       ));
     }
     return durationRange;
+  }
+
+  /// Adds a [html.VideoElement] to the [_proxyVideoElements].
+  void addProxyVideoElement(html.VideoElement videoElement) {
+    _proxyVideoElements.add(videoElement);
   }
 }

@@ -80,12 +80,46 @@ class VideoPlayerPlugin extends VideoPlayerPlatform {
       ..style.height = '100%'
       ..style.width = '100%';
 
-    // TODO(hterkelsen): Use initialization parameters once they are available
-    ui.platformViewRegistry.registerViewFactory(
-        'videoPlayer-$textureId', (int viewId) => videoElement);
-
     final VideoPlayer player = VideoPlayer(videoElement: videoElement)
       ..initialize();
+
+    // TODO(hterkelsen): Use initialization parameters once they are available
+    ui.platformViewRegistry.registerViewFactory(
+      'videoPlayer-$textureId',
+      (int viewId) {
+        if (viewId == 0) {
+          return videoElement;
+        }
+
+        // final VideoElement proxyVideoElement =
+        //     videoElement.clone(true) as VideoElement;
+
+        final VideoElement proxyVideoElement = VideoElement()
+          ..src = videoElement.src
+          ..id = 'videoElement-$textureId-proxy-$viewId'
+          ..style.border = videoElement.style.border
+          ..style.height = videoElement.style.height
+          ..style.width = videoElement.style.width
+          ..autoplay = videoElement.autoplay
+          ..controls = videoElement.controls
+          ..loop = videoElement.loop
+          ..muted = videoElement.muted
+          ..volume = videoElement.volume
+          ..playbackRate = videoElement.playbackRate
+          ..currentTime = videoElement.currentTime
+          ..setAttribute('playsinline', 'true')
+          ..setAttribute('autoplay', 'false');
+
+        if (videoElement.paused) {
+          proxyVideoElement.pause();
+        } else {
+          proxyVideoElement.play().catchError((Object e) {});
+        }
+
+        player.addProxyVideoElement(proxyVideoElement);
+        return proxyVideoElement;
+      },
+    );
 
     _videoPlayers[textureId] = player;
 
